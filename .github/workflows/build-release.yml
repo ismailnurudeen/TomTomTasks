@@ -1,0 +1,109 @@
+name: Build and Release APKs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-apks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        flavor: [F1, F2, F3]
+        buildType: [debug, release]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Download dependencies
+        run: ./gradlew dependencies
+
+      - name: Generate Tag
+        id: release_tag
+        uses: ./.github/actions/generate-tag
+
+      - name: Decode and Save Keystore
+        env:
+          ENCODED_STRING: ${{ secrets.KEYSTORE_BASE_64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$ENCODED_STRING" | base64 --decode > release-key.jks
+
+      - name: Build APK for ${{ matrix.flavor }} ${{ matrix.buildType }}
+        run: ./gradlew assemble${{ matrix.flavor }}${{ matrix.buildType }}
+        env:
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ steps.release_tag.outputs.tag }}
+          path: app/build/outputs/apk/${{ matrix.flavor }}/${{ matrix.buildType }}/
+
+      - name: Create failure note
+        if: failure()
+        run: echo "Some builds failed" > failure.txt
+
+      - name: Upload failure note
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-note
+          path: failure.txt
+
+  release:
+    needs: build-apks
+    runs-on: ubuntu-latest
+    if: always()
+    strategy:
+      matrix:
+        flavor: [ F1, F2, F3 ]
+        buildType: [ debug, release ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Tag
+        id: release_tag
+        uses: ./.github/actions/generate-tag
+
+      - name: Download APK Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ steps.release_tag.outputs.tag }}
+          path: app/build/outputs/apk/${{ matrix.flavor }}/${{ matrix.buildType }}
+
+      - name: Download failure note (if exists)
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: failure-note
+          path: .
+        continue-on-error: true
+
+      # Create the release with APKs and failure note (if any)
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.release_tag.outputs.tag }}"
+          name: "App Release ${{ steps.release_tag.outputs.tag }}"
+          draft: false
+          prerelease: false
+          files: |
+            app/build/outputs/apk/**/*.apk
+            failure.txt

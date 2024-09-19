@@ -1,0 +1,27 @@
+name: Generate and Increment Tag
+description: Generate and increment the latest git tag.
+
+outputs:
+  tag:
+    description: "Release tag"
+    value: ${{ steps.new-release-tag.outputs.tag }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate and Increment Tag
+      id: new-release-tag
+      shell: bash
+      run: |
+        git fetch --tags
+        latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+        if [ -z "$latest_tag" ]; then
+          new_tag="v0.1.0"
+        else
+          clean_tag=${latest_tag#v}
+          IFS='.' read -r major minor patch <<< "$clean_tag"
+          new_patch=$((patch + 1))
+          new_tag="v${major}.${minor}.${new_patch}"
+        fi
+        echo "New tag is $new_tag"
+        echo "tag=$new_tag" >> $GITHUB_OUTPUT
