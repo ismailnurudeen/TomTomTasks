@@ -14,6 +14,9 @@ jobs:
         flavor: [F1, F2, F3]
         buildType: [debug, release]
 
+    outputs:
+      release_tag: ${{ steps.generate_tag.outputs.tag }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,7 +31,7 @@ jobs:
         run: ./gradlew dependencies
 
       - name: Generate Tag
-        id: release_tag
+        id: generate_tag
         uses: ./.github/actions/generate-tag
 
       - name: Decode and Save Keystore
@@ -51,7 +54,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ steps.release_tag.outputs.tag }}
+          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ steps.generate_tag.outputs.tag }}
           path: app/build/outputs/apk/${{ matrix.flavor }}/${{ matrix.buildType }}/
 
       - name: Create failure note
@@ -71,21 +74,17 @@ jobs:
     if: always()
     strategy:
       matrix:
-        flavor: [ F1, F2, F3 ]
-        buildType: [ debug, release ]
+        flavor: [F1, F2, F3]
+        buildType: [debug, release]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate Tag
-        id: release_tag
-        uses: ./.github/actions/generate-tag
-
       - name: Download APK Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ steps.release_tag.outputs.tag }}
+          name: apk-${{ matrix.flavor }}-${{ matrix.buildType }}-${{ needs.build-apks.outputs.release_tag }}
           path: app/build/outputs/apk/${{ matrix.flavor }}/${{ matrix.buildType }}
 
       - name: Download failure note (if exists)
@@ -100,8 +99,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "${{ steps.release_tag.outputs.tag }}"
-          name: "App Release ${{ steps.release_tag.outputs.tag }}"
+          tag_name: "${{ needs.build-apks.outputs.release_tag }}"
+          name: "App Release ${{ needs.build-apks.outputs.release_tag }}"
           draft: false
           prerelease: false
           files: |
